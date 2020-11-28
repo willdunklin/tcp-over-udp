@@ -9,7 +9,8 @@
 
 #define PORT      8080
 #define DATA_SIZE 4096
-#define MAX_TRIES 5
+#define MAX_TRIES 3
+#define TIMEOUT   3
 
 typedef struct tcp_datagram {
     uint32_t sequence;
@@ -37,22 +38,20 @@ void print_datagram(tcp_datagram* data) {
     printf("{%d, %d, %d, %d, %s}\n", data->sequence, data->acknowledgement, data->syn, data->ack, data->data);
 }
 
-void print_buffer(char* label) {
+void print_data(char* label, tcp_datagram* data) {
     printf("%s", label);
-    tcp_datagram data;
-    memcpy(&data, buffer, sizeof(tcp_datagram));
-    print_datagram(&data);
+    print_datagram(data);
 }
 
 int udp_recv(tcp_datagram* datagram) {
     int len = sizeof(servaddr);
     int result = recvfrom(sockfd, (tcp_datagram *)datagram, sizeof(tcp_datagram), MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
-    print_buffer("receiving: ");
+    print_data("receiving: ", datagram);
     return result;
 }
 
 int udp_send(tcp_datagram* datagram) {
-    print_buffer("sending: ");
+    print_data("sending: ", datagram);
     return sendto(sockfd, (tcp_datagram *)datagram, sizeof(tcp_datagram), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 }
 
@@ -117,7 +116,7 @@ void init() {
 
     // Set the timeouts for send/recv
     struct timeval tv;
-    tv.tv_sec = 10; // Timeout in seconds
+    tv.tv_sec = TIMEOUT; // Timeout in seconds
     tv.tv_usec = 0;
     setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
@@ -135,7 +134,7 @@ int main() {
     // Initialize UDP connection (source: https://www.geeksforgeeks.org/udp-server-client-implementation-c/)
     init();
     
-    establish();
+    tcp_send("hello");
 
     close(sockfd);
     return 0;
