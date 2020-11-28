@@ -10,7 +10,9 @@
 #define PORT      8080
 #define DATA_SIZE 4096
 #define MAX_TRIES 3
-#define TIMEOUT   3
+#define TIMEOUT   10
+
+#define SEQ_START 39492 // Should be random and programmatic
 
 typedef struct tcp_datagram {
     uint32_t sequence;
@@ -46,16 +48,17 @@ void print_data(char* label, tcp_datagram* data) {
 int udp_recv(tcp_datagram* datagram) {
     int len = sizeof(servaddr);
     int result = recvfrom(sockfd, (tcp_datagram *)datagram, sizeof(tcp_datagram), MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
-    print_data("received:", datagram);
+    print_data("<- ", datagram);
     return result;
 }
 
 int udp_send(tcp_datagram* datagram) {
-    print_data("sending: ", datagram);
+    print_data("-> ", datagram);
     return sendto(sockfd, (tcp_datagram *)datagram, sizeof(tcp_datagram), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 }
 
 void tcp_recv() {
+    memset(msg, 0, sizeof(tcp_datagram));
     // Receive, if timeout happens exit
     if(udp_recv(msg) == -1)
         return;
@@ -65,17 +68,38 @@ void tcp_recv() {
 
     // Handle 3 way handshake
     if(msg->syn == 1) {
-        //etc
+        int tries = 0;
+        do {
+            memset(msg, 0, sizeof(tcp_datagram));
+            msg->ack = 1;
+            msg->syn = 1;
+            msg->acknowledgement = last_recv_msg->sequence + 1;
+            msg->sequence = SEQ_START;
+            memcpy(msg->data, "SYNACK", DATA_SIZE);
+
+            memcpy(last_sent_msg, msg, sizeof(tcp_datagram));
+            udp_send(msg);
+        // Loop back if the ack is invalid unless we've exhausted the number of tries
+        } while (tries++ < MAX_TRIES
+                && (udp_recv(msg) == -1
+                || last_sent_msg->acknowledgement != msg->sequence
+                || last_sent_msg->sequence + 1 != msg->acknowledgement
+                || msg->ack != 1));
+
+        memcpy(last_recv_msg, msg, sizeof(tcp_datagram));
+        printf("COMPLETED HANDSHAKE\n\n");
+        return;
     }
     // If something is off, exit and wait for retransmission
-    if(last_sent_msg->acknowledgement != msg->sequence || last_sent_msg->sequence + 1 != msg->acknowledgement || msg->ack == 1)
-        return;
+    // if(last_sent_msg->acknowledgement != msg->sequence || last_sent_msg->sequence + 1 != msg->acknowledgement || msg->ack == 1)
+    //     return;
 
     // We know we've got a valid message we're acknowledging
     memset(msg, 0, sizeof(tcp_datagram));
     msg->ack = 1;
     msg->acknowledgement = last_recv_msg->sequence + 1;
     msg->sequence = last_recv_msg->acknowledgement;
+    memcpy(msg->data, "ACK", DATA_SIZE);
 
     memcpy(last_sent_msg, msg, sizeof(tcp_datagram));
     udp_send(msg);
@@ -98,6 +122,38 @@ void tcp_send(char* data) {
              || last_sent_msg->acknowledgement != msg->sequence
              || last_sent_msg->sequence + 1 != msg->acknowledgement
              || msg->ack != 1));
+
+    memcpy(last_recv_msg, msg, sizeof(tcp_datagram));
+}
+
+void sync() {
+    int tries = 0;
+    do {
+        memset(msg, 0, sizeof(tcp_datagram));
+        msg->sequence = SEQ_START;
+        msg->syn = 1;
+        memcpy(msg->data, "SYN", DATA_SIZE);
+
+        memcpy(last_sent_msg, msg, sizeof(tcp_datagram));
+        udp_send(msg);
+    // Loop back if the ack is invalid unless we've exhausted the number of tries
+    } while (tries++ < MAX_TRIES
+             && (udp_recv(msg) == -1
+             || last_sent_msg->sequence + 1 != msg->acknowledgement
+             || msg->ack != 1 || msg-> syn != 1));
+
+    memcpy(last_recv_msg, msg, sizeof(tcp_datagram));
+
+    memset(msg, 0, sizeof(tcp_datagram));
+    msg->acknowledgement = last_recv_msg->sequence + 1;
+    msg->sequence = last_recv_msg->acknowledgement;
+    msg->ack = 1;
+    memcpy(msg->data, "ACK", DATA_SIZE);
+
+    memcpy(last_sent_msg, msg, sizeof(tcp_datagram));
+    udp_send(msg);
+
+    printf("COMPLETED HANDSHAKE\n\n");
 }
 
 void init() {
@@ -128,11 +184,7 @@ void init() {
     setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 
     last_sent_msg = create_datagram();
-    last_sent_msg->acknowledgement = 13124; // Corresponds to initial sequence number
-
     last_recv_msg = create_datagram();
-    last_recv_msg->acknowledgement = last_sent_msg->acknowledgement;
-
     msg = create_datagram();
 }
 
@@ -140,9 +192,14 @@ int main() {
     // Initialize UDP connection (source: https://www.geeksforgeeks.org/udp-server-client-implementation-c/)
     init();
     
-    int i;
-    for(i = 0; i < 3; i++) {
-        tcp_recv();
-    }
+    // Handshake
+    tcp_recv();
+
+    tcp_recv();
+
+    tcp_send("hows it going?");
+
+    tcp_recv();
+
     return 0;
 }
