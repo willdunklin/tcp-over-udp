@@ -28,28 +28,27 @@ void print_datagram(tcp_datagram* data) {
     printf("{%d, %d, %d, %d, %s}\n", data->sequence, data->acknowledgement, data->syn, data->ack, data->data);
 }
 
-void print_buffer() {
+void print_buffer(char* label) {
+    printf(label);
     tcp_datagram data;
     memcpy(&data, buffer, sizeof(tcp_datagram));
     print_datagram(&data);
 }
 
-int tcp_recv() {
+int udp_recv() {
     int len = sizeof(servaddr);
     recvfrom(sockfd, (char *)buffer, sizeof(tcp_datagram), MSG_WAITALL, (struct sockaddr *) &servaddr, &len);
-    printf("receiving: ");
-    print_buffer();
+    print_buffer("received: ");
 }
 
-int tcp_send() {
-    printf("sending: ");
-    print_buffer();
+int udp_send() {
+    print_buffer("sending: ");
     sendto(sockfd, (char *)buffer, sizeof(tcp_datagram), MSG_CONFIRM, (const struct sockaddr *) &servaddr, sizeof(servaddr));
 }
 
 int establish() {
     // Receive
-    tcp_recv();
+    udp_recv();
     // Unpack msg
     tcp_datagram msg, new_msg;
     memcpy(&msg, buffer, sizeof(tcp_datagram));
@@ -62,10 +61,10 @@ int establish() {
 
     do {
         memcpy(buffer, &msg, sizeof(tcp_datagram));
-        tcp_send();
+        udp_send();
 
         // Wait for ack
-        tcp_recv();
+        udp_recv();
         memcpy(&new_msg, buffer, sizeof(tcp_datagram));
     }while (new_msg.acknowledgement != last_seq + 1 && new_msg.sequence != last_ack && new_msg.ack != 1);
 }
